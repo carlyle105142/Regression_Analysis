@@ -1,0 +1,549 @@
+---
+title: "206 Project Appendix B"
+author: "Longbei Xu, Gu Gong, Yichu Chen"
+date: "12/2/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Appendix B
+
+```{r, echo=FALSE}
+library(reshape2)
+library(ggplot2)
+library(GGally)
+library(RColorBrewer)
+library(MASS)
+library(leaps)
+library(car)
+
+set.seed(123)
+```
+
+
+```{r, results='hide'}
+# import data
+plasma <- read.delim("Plasma.txt", stringsAsFactors=TRUE)
+
+# check missing value
+colSums(is.na.data.frame(plasma))
+
+# check data type
+lapply(plasma, class)
+```
+
+```{r}
+# numerical and categorical sub.dataframe
+num_data <- plasma[,unlist(lapply(plasma, is.numeric))]
+cat_data <- plasma[,!unlist(lapply(plasma, is.numeric))]
+cat.response <- cbind(plasma[,c('BETAPLASMA','RETPLASMA')], cat_data)
+
+# column names
+num_names <- names(num_data)
+cat_names <- names(cat_data)
+```
+
+```{r, fig.width=12, fig.height=10, message=FALSE, fig.show='hide'}
+lowerF <- function(data, mapping, method = "lm") {
+  p <- ggplot(data = data, mapping = mapping) +
+    # scatter plot
+    geom_point(alpha=0.3) +
+    # smoothed regression line
+    geom_smooth(method = method, color = "red")
+  p
+}
+ggpairs(num_data, lower = list(continuous = wrap(lowerF, method= "lm")))
+```
+
+```{r, fig.show='hide'}
+# correlation heatmap
+ggcorr(num_data, method = c("everything", "pearson"), cex=2)+labs(title="Correlation Heatmap for Numerical Variables")
+```
+
+```{r, fig.show='hide'}
+# histogram and boxplots for continuous variables
+num_long <- melt(num_data)
+
+ggplot(num_long,aes(x = value)) + 
+    facet_wrap(~variable,scales = "free") + 
+    geom_histogram(aes(y = ..density..), color = 2, fill = "white") +
+    geom_density(lwd = 0.6,
+               linetype = 2,
+               color = 1,
+               fill=2,
+               alpha=0.1)
+
+ggplot(num_long)+
+  facet_wrap(~variable, scales='free')+
+  geom_boxplot(aes(y= value)) 
+```
+
+```{r, warning=FALSE, fig.width=16, fig.show='hide'}
+# pie charts for categorical variables
+
+par(mfrow=c(1,3))
+tab_vit <- table(cat_data$VITUSE)
+pct_vit <- round(100*tab_vit/nrow(cat_data))
+label_vit <- paste(levels(cat_data$VITUSE), pct_vit)
+label_vit <- paste(label_vit, "%", sep=" ")
+pie(tab_vit, border="white", labels=label_vit, col= brewer.pal(length(levels(cat_data$VITUSE)), "Pastel1"), main="Vitamin Use")
+
+tab_sex <- table(cat_data$SEX)
+pct_sex <- round(100*tab_sex/nrow(cat_data))
+label_sex <- paste(levels(cat_data$SEX), pct_sex)
+label_sex <- paste(label_sex, "%", sep=" ")
+pie(tab_sex, border="white", labels=label_sex, col= brewer.pal(length(levels(cat_data$SEX)), "Pastel1"), main="Sex")
+
+tab_smoke <- table(cat_data$SMOKSTAT)
+pct_smoke <- round(100*tab_smoke/nrow(cat_data))
+label_smoke <- paste(levels(cat_data$SMOKSTAT), pct_smoke)
+label_smoke <- paste(label_smoke, "%", sep=" ")
+pie(tab_smoke, border="white", labels=label_smoke, col= brewer.pal(length(levels(cat_data$SMOKSTAT)), "Pastel1"), main="Smoking Status")
+
+
+```
+```{r, fig.width=8, fig.show='hide'}
+# boxplot for categorical variables vs. response variables
+
+library(patchwork)
+
+par(mfrow=c(1,2))
+
+p1 <- ggplot(cat.response, aes(x=VITUSE)) +
+      geom_boxplot(position = "dodge2", aes(y=BETAPLASMA)) +
+      labs(title="Beta-Plasma VS. Vitamin Use")
+
+  
+p2 <- ggplot(cat.response, aes(x=VITUSE)) +
+      geom_boxplot(position = "dodge2", aes(y=RETPLASMA)) +
+      labs(title="Retinol-Plasma VS. Vitamin Use")
+
+p3 <- ggplot(cat.response, aes(x=SEX)) +
+      geom_boxplot(position = "dodge2", aes(y=BETAPLASMA)) +
+      labs(title="Beta-Plasma VS. Sex")
+
+p4 <- ggplot(cat.response, aes(x=SEX)) +
+      geom_boxplot(position = "dodge2", aes(y=RETPLASMA)) +
+      labs(title="Retinol-Plasma VS. Sex")
+
+p5 <- ggplot(cat.response, aes(x=SMOKSTAT)) +
+      geom_boxplot(position = "dodge2", aes(y=BETAPLASMA)) +
+      labs(title="Beta-Plasma VS. Smoking Status")
+
+p6 <- ggplot(cat.response, aes(x=SMOKSTAT)) +
+      geom_boxplot(position = "dodge2", aes(y=RETPLASMA)) +
+      labs(title="Retinol-Plasma VS. Smoking Status")
+
+
+p1+p3+p5+p2+p4+p6+plot_layout(ncol = 3)
+
+   
+```
+
+```{r}
+set.seed(123)
+
+# train-test split
+N <- nrow(plasma)
+pool <- c(1:N)
+
+train_idx <- sample(pool, size=ceiling(N*0.9))
+valid_idx <- pool[-train_idx]
+
+# split for 2 responses
+betaplasma <- plasma[, !names(plasma)%in%c("RETPLASMA")]
+retplasma <- plasma[, !names(plasma)%in%c("BETAPLASMA")]
+
+beta_train <- betaplasma[train_idx,]
+beta_valid <- betaplasma[valid_idx,]
+
+ret_train <- retplasma[train_idx,]
+ret_valid <- retplasma[valid_idx,]
+```
+
+
+## Beta-carotene plasma concentration
+
+### Initial Checking
+```{r}
+#First-order full model before transformation (used for Box-Cox and assumption checking)
+beta.reg <- lm(BETAPLASMA +1~ ., data=beta_train)
+# summary(beta.reg)
+```
+
+```{r, fig.show='hide'}
+# assumption checking for beta-carotene
+par(mfrow=c(1,2))
+plot(beta.reg, which=1)
+plot(beta.reg, which=2)
+```
+
+```{r, fig.show='hide'}
+# Box-Cox procedure for beta-carotene
+library(MASS)
+bc = boxcox(beta.reg)
+```
+
+```{r}
+# First-order full model with transformed Y
+beta.reg <- lm(log(BETAPLASMA+1) ~ ., data=beta_train)
+```
+
+```{r, fig.show='hide'}
+# initial assumption checking for beta carotene
+par(mfrow=c(1,2))
+plot(beta.reg, which=1)
+plot(beta.reg, which=2)
+```
+
+### Candidate Model (without interaction) for beta-carotene
+
+```{r, results='hide'}
+#first-order model stepwise selection using AIC
+step.reg.beta <- stepAIC(beta.reg, direction="both", trace=0)
+summary(step.reg.beta)
+
+# model AIC
+AIC(step.reg.beta)
+```
+
+```{r, fig.show='hide'}
+#residuals for first-order model (based on stepwise selection)
+{plot(step.reg.beta, which=1)
+plot(step.reg.beta, which=2)}
+```
+
+### Final Model (with interaction) for beta-carotene
+
+```{r, results='hide'}
+# interaction model for beta-carotene (stepwise AIC)
+step.reg <- stepAIC(lm(log(BETAPLASMA+1)~1, data=beta_train), scope = ~(AGE+SEX+SMOKSTAT+QUETELET+VITUSE+CALORIES+FAT+FIBER+ALCOHOL+CHOLESTEROL+BETADIET+RETDIET)^2, direction="both", trace=0)
+
+summary(step.reg)
+
+# model AIC
+AIC(step.reg)
+
+# anova table
+step.reg$anova
+```
+
+
+## Retinol plasma concentration
+
+### Initial Checking
+```{r, fig.show='hide'}
+#First-order before transformation 
+ret.reg <- lm(RETPLASMA ~ ., data=ret_train)
+# summary(ret.reg)
+
+# before transformation
+par(mfrow=c(1,2))
+plot(ret.reg, which=1)
+plot(ret.reg, which=2)
+```
+
+```{r, fig.show='hide'}
+# Box-Cox transformation
+library(MASS)
+bc1 =boxcox(ret.reg, data=ret_train)
+```
+```{r}
+#First-order with transformation
+ret.reg <- lm(log(RETPLASMA) ~ ., data=ret_train)
+# summary(ret.reg)
+```
+
+```{r, fig.show='hide'}
+# after transformation: assumption checking
+par(mfrow=c(1,2))
+plot(ret.reg, which=1)
+plot(ret.reg, which=2)
+```
+
+### Candidate Model (without interaction) for retinol
+```{r, results='hide'}
+#first-order stepwise using AIC
+
+ret.reg0 <- lm(log(RETPLASMA) ~ 1, data=ret_train)
+ret.reg <- stepAIC(ret.reg0, 
+                   scope = ~(AGE+SEX+SMOKSTAT+QUETELET+VITUSE+CALORIES+FAT+FIBER+ALCOHOL+CHOLESTEROL+BETADIET+RETDIET), direction="both", trace=0)
+summary(ret.reg)
+
+AIC(ret.reg)
+```
+
+```{r, fig.show='hide'}
+#residuals for assumption checking
+{plot(ret.reg, which=1)
+plot(ret.reg, which=2)}
+```
+
+
+### Final Model (with interaction) for retinol
+```{r, results='hide'}
+
+none_mod<- lm(RETPLASMA~1, data=ret_train) ##model with only intercept
+
+full_mod<-lm(RETPLASMA~(.)^2,data=ret_train)
+# summary(full_mod)
+
+library(MASS)
+#forward selection based on AIC: 
+stepRET.aic<-stepAIC(none_mod, scope=list(upper=full_mod, lower = ~1), direction="both", k=2, trace = FALSE)
+summary(stepRET.aic)
+
+stepRET.aic$anova
+
+AIC(stepRET.aic)
+```
+
+
+
+
+## Model validation
+
+### Beta-Carotene
+
+```{r}
+step.reg.beta <- stepAIC(lm(log(BETAPLASMA+1)~1, data=beta_train), scope = ~(AGE+SEX+SMOKSTAT+QUETELET+VITUSE+CALORIES+FAT+FIBER+ALCOHOL+CHOLESTEROL+BETADIET+RETDIET)^2, direction="both", trace=0)
+
+# train set SSE
+sse_t <- sum(step.reg.beta$residuals^2)
+```
+
+
+#### Variance Inflation Factor
+```{r, results='hide'}
+# VIF
+vif(step.reg.beta)
+```
+
+#### MSPE
+```{r, results='hide'}
+# MSPE
+y.hat.beta <- predict(step.reg.beta, beta_valid)
+MSPE.beta <- mean((log(beta_valid$BETAPLASMA+1) - y.hat.beta)^2)
+MSPE.beta
+```
+```{r, results='hide'}
+# SSE/n
+n=N*0.7
+sse.beta_train <- sum(step.reg.beta$residuals^2)
+sse.beta_train/n
+```
+
+#### Outlying Y
+```{r, fig.show='hide'}
+# final model for beta-carotene, fit1
+fit1<- lm(log(BETAPLASMA+1)~ QUETELET + VITUSE + CHOLESTEROL + BETADIET + FIBER + AGE + VITUSE:BETADIET, data=beta_train)
+e1<-fit1$residuals  ##ordinary residuals 
+h1<-influence(fit1)$hat ##diagonals of the hat matrix: a.k.a. leverage values 
+de1<-e1/(1-h1) ##deleted residuals 
+{plot(e1,de1, xlab="residuals", ylab="deleted residuals")
+abline(0,1)}
+```
+
+```{r, results='hide'}
+summary(h1)
+```
+
+```{r, results='hide'}
+library(MASS)
+stu.res.del1 <- studres(fit1)
+head(sort(abs(stu.res.del1), decreasing=TRUE))
+```
+
+```{r}
+# Bonferroni-corrected threshold for outlying Y
+qt(1-.1/(2*n), n-10-1)
+```
+
+```{r, results='hide'}
+h1 <- influence(fit1)$hat
+p1 <- 10
+sort(h1[which(h1>2*p1/n)], decreasing = TRUE)
+```
+
+
+#### Cook's Distance
+```{r}
+# Cook's distance
+res1 <- fit1$residuals
+mse1 <- anova(fit1)["Residuals", 3]
+cook.d1 <- res1^2*h1/(p1*mse1*(1-h1)^2)
+```
+
+
+#### Influencial Points based on Cook's Distance
+```{r, results='hide'}
+# ranking of each observation based on Cook's Distance
+sort(cook.d1[which(cook.d1>4/(n-p1))], decreasing = TRUE)
+```
+```{r, fig.show='hide'}
+plot(fit1, which=4)
+```
+```{r, fig.show='hide'}
+plot(fit1, which=5)
+```
+
+#### Evaluation on effect of influencial point
+```{r, results='hide'}
+fit.257<-lm(log(BETAPLASMA+1)~  QUETELET + VITUSE + CHOLESTEROL + BETADIET + FIBER + AGE + VITUSE:BETADIET, data=beta_train, subset=setdiff(rownames(beta_train), "257")) ##exclude case 257
+rbind(fit1$coefficients,fit.257$coefficients) ##compare fitted regression coefficients
+```
+
+```{r, fig.show='hide'}
+{plot(fit1$fitted.value, predict(fit.257, beta_train[,c("QUETELET","CHOLESTEROL","BETADIET","FIBER","VITUSE","AGE")]), xlab="fitted values using all cases", ylab="fitted values without using case 257") ## compare fitted values
+abline(0,1)}
+```
+
+
+
+### Retinol
+
+```{r, results='hide'}
+# the final model
+stepRET.aic
+# SSE
+sse.ret_train <- sum(stepRET.aic$residuals^2)
+```
+
+#### Variance Inflation Factor
+```{r, results='hide'}
+# VIF
+vif(ret.reg)
+```
+
+#### MSPE
+```{r, results='hide'}
+# MSPE
+newdata2 <- ret_valid
+y.hat.ret <- predict(stepRET.aic, newdata2)
+MSPE2 <- mean((log(ret_valid$RETPLASMA+1) - y.hat.ret)^2)
+MSPE2
+```
+```{r, results='hide'}
+# SSE/n
+n=N*0.7
+sse.ret_train/n
+```
+
+#### Outlying Y
+
+```{r, fig.show='hide'}
+# final model for retinol, fit2
+fit2<- lm(log(RETPLASMA+1)~ ALCOHOL + AGE +  CHOLESTEROL + SEX + CHOLESTEROL:SEX, data = ret_train)
+e2<-fit2$residuals ##ordinary residuals 
+h2<-influence(fit2)$hat ##diagonals of the hat matrix: a.k.a. leverage values 
+de2<-e2/(1-h2) ##deleted residuals 
+{plot(e2,de2, xlab="residuals", ylab="deleted residuals")
+abline(0,1)}
+```
+
+```{r, results='hide'}
+summary(h2)
+```
+
+```{r, results='hide'}
+library(MASS)
+stu.res.del2 <- studres(fit2)
+head(sort(abs(stu.res.del2), decreasing=TRUE))
+```
+
+```{r, results='hide'}
+# Bonferroni-corrected threshold
+qt(1-.1/(2*n), n-6-1)
+```
+
+```{r, results='hide'}
+p2 <- 6
+sort(h2[which(h2>2*p2/n)], decreasing = TRUE)
+```
+
+#### Cook's Distance
+```{r}
+# Cook's Distance
+res2 <- fit2$residuals
+mse2 <- anova(fit2)["Residuals", 3]
+cook.d2 <- res2^2*h2/(p2*mse2*(1-h2)^2)
+
+```
+
+
+#### Influencial Points based on Cook's Distance
+```{r, results='hide'}
+# ranking of each observation based on Cook's Distance
+sort(cook.d2[which(cook.d2>4/(n-p2))], decreasing = TRUE)
+```
+
+```{r, fig.show='hide'}
+plot(fit2, which=4)
+```
+```{r, fig.show='hide'}
+plot(fit2, which=5)
+```
+
+#### Evaluation on effect of influencial point
+```{r, results='hide'}
+fit.27649<-lm(log(RETPLASMA+1)~ ALCOHOL + AGE +  CHOLESTEROL + SEX + CHOLESTEROL:SEX, data = ret_train, subset=setdiff(rownames(ret_train), "276,49")) ##exclude case 276,49
+rbind(fit2$coefficients,fit.27649$coefficients) ##compare fitted regression coefficients
+```
+
+
+```{r, fig.show='hide'}
+{plot(fit2$fitted.value, predict(fit.27649, ret_train[,c("ALCOHOL" , "AGE" , "SEX" , "CHOLESTEROL")]), xlab="fitted values using all cases", ylab="fitted values with0out using case 308") ## compare fitted values
+abline(0,1)}
+```
+
+
+### Final Evaluation on Goodness-of-fit
+```{r, fig.show='hide'}
+# goodness of fit for final models
+par(mfrow=c(1,2))
+plot(fit1, which=1)
+plot(fit1, which=2)
+
+par(mfrow=c(1,2))
+plot(fit2, which=1)
+plot(fit2, which=2)
+```
+
+### Model Summary
+```{r}
+# beta-carotene
+summary(fit1)
+```
+
+```{r}
+# retinol
+summary(fit2)
+```
+
+### ANOVA table
+```{r}
+# beta-carotene
+anova(fit1)
+```
+
+```{r}
+# retinol
+anova(fit2)
+```
+
+
+```{r}
+vif1.test = lm(log(BETAPLASMA+1)~ QUETELET + VITUSE + CHOLESTEROL + BETADIET + FIBER + AGE, data=beta_train)
+vif(vif1.test)
+```
+
+```{r}
+vif2.test = lm(log(RETPLASMA+1)~ ALCOHOL + AGE +  CHOLESTEROL + SEX, data=ret_train)
+vif(vif2.test)
+```
+
